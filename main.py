@@ -153,17 +153,33 @@ async def get_cases(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Access denied.")
     status_to_fetch = "pending_junior_review" if role == 'junior_doctor' else "pending_senior_review"
     cases_ref = db.collection('cases').where('status', '==', status_to_fetch).stream()
-    return [{"id": doc.id, **doc.to_dict()} for doc in cases_ref]
+    
+    # Manually format timestamp to ensure consistency
+    case_list = []
+    for doc in cases_ref:
+        data = doc.to_dict()
+        if 'createdAt' in data and hasattr(data['createdAt'], 'timestamp'):
+            ts = data['createdAt'].timestamp()
+            data['createdAt'] = {'_seconds': int(ts), '_nanoseconds': int((ts - int(ts)) * 1e9)}
+        case_list.append({"id": doc.id, **data})
+    return case_list
 
-# --- THIS ENDPOINT WAS MISSING ---
 @app.get("/my-cases")
 async def get_my_cases(current_user: dict = Depends(get_current_user)):
     if current_user.get('role') != 'patient':
         raise HTTPException(status_code=403, detail="Access denied.")
 
     cases_ref = db.collection('cases').where('patientEmail', '==', current_user['email']).stream()
-    return [{"id": doc.id, **doc.to_dict()} for doc in cases_ref]
-# --------------------------------
+    
+    # Manually format timestamp to ensure consistency
+    case_list = []
+    for doc in cases_ref:
+        data = doc.to_dict()
+        if 'createdAt' in data and hasattr(data['createdAt'], 'timestamp'):
+            ts = data['createdAt'].timestamp()
+            data['createdAt'] = {'_seconds': int(ts), '_nanoseconds': int((ts - int(ts)) * 1e9)}
+        case_list.append({"id": doc.id, **data})
+    return case_list
 
 @app.put("/cases/{case_id}/review")
 async def review_case(case_id: str, review: CaseReview, current_user: dict = Depends(get_current_user)):

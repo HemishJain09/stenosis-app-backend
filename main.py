@@ -12,8 +12,6 @@ import logging
 
 # --- LangGraph Integration ---
 from graph.workflow import app as stenosis_workflow_app
-
-# --- GCP Tools ---
 from tools.gcp_auth import get_gcp_credentials
 
 # Load environment variables from .env file
@@ -27,31 +25,19 @@ db = firestore.client()
 # --- FastAPI App Initialization ---
 app = FastAPI()
 
-# Configure CORS
-
+# --- CORS CONFIGURATION ---
+origins = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "https://stenosis-app-frontend-git-main-hemish-jains-projects.vercel.app", # Your Vercel URL
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# --- AI Model Simulation ---
-def simulate_ai_model(filename: str):
-    """
-    This function simulates a pre-trained model analyzing an angiography video.
-    """
-    print(f"--- Simulating AI analysis for file: {filename} ---")
-    risk_level = random.choice(['high', 'low', 'low'])
-    if risk_level == 'high':
-        confidence = random.randint(80, 95)
-        report_text = f"Model analysis indicates a high probability ({confidence}%) of significant stenosis. Immediate review by a senior specialist is recommended."
-    else:
-        confidence = random.randint(60, 79)
-        report_text = f"Model analysis indicates a low to moderate probability ({confidence}%) of stenosis. A routine check by a junior doctor is advised."
-    print(f"--- Simulation Result: Risk Level='{risk_level}' ---")
-    return {"riskLevel": risk_level, "modelReport": report_text}
 
 # --- Security ---
 async def get_current_user(authorization: str = Header(...)):
@@ -111,20 +97,25 @@ async def get_patients(current_user: dict = Depends(get_current_user)):
             doc_data = doc.to_dict()
             if 'name' in doc_data and 'email' in doc_data:
                 patient_list.append({"uid": doc.id, **doc_data})
-            else:
-                print(f"⚠️ WARNING: Skipping document {doc.id} due to missing 'name' or 'email' field.")
         return patient_list
     except Exception as e:
         logging.error(f"Error fetching patients: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="An error occurred while fetching patients.")
 
+def simulate_ai_model(filename: str):
+    print(f"--- Simulating AI analysis for file: {filename} ---")
+    risk_level = random.choice(['high', 'low', 'low'])
+    if risk_level == 'high':
+        confidence = random.randint(80, 95)
+        report_text = f"Model analysis indicates a high probability ({confidence}%) of significant stenosis. Immediate review by a senior specialist is recommended."
+    else:
+        confidence = random.randint(60, 79)
+        report_text = f"Model analysis indicates a low to moderate probability ({confidence}%) of stenosis. A routine check by a junior doctor is advised."
+    print(f"--- Simulation Result: Risk Level='{risk_level}' ---")
+    return {"riskLevel": risk_level, "modelReport": report_text}
+
 @app.post("/cases")
-async def create_case(
-    patientName: str = Form(...),
-    patientEmail: str = Form(...),
-    file: UploadFile = File(...),
-    current_user: dict = Depends(get_current_user)
-):
+async def create_case(patientName: str = Form(...), patientEmail: str = Form(...), file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
     if current_user.get('role') != 'clinic':
         raise HTTPException(status_code=403, detail="Only clinic personnel can perform this action.")
     try:
@@ -135,16 +126,13 @@ async def create_case(
         bucket_name = os.getenv("FIREBASE_STORAGE_BUCKET")
         if not bucket_name:
             raise ValueError("FIREBASE_STORAGE_BUCKET environment variable not set.")
-        
         bucket = storage.bucket(bucket_name)
         unique_filename = f"{uuid.uuid4()}-{file.filename}"
         blob = bucket.blob(f"dicom_files/{unique_filename}")
-        
         blob.upload_from_file(file.file, content_type=file.content_type)
         blob.make_public()
         
         status = "pending_senior_review" if risk_level == "high" else "pending_junior_review"
-        
         case_data = {
             "patientName": patientName,
             "patientEmail": patientEmail,
@@ -166,6 +154,16 @@ async def get_cases(current_user: dict = Depends(get_current_user)):
     status_to_fetch = "pending_junior_review" if role == 'junior_doctor' else "pending_senior_review"
     cases_ref = db.collection('cases').where('status', '==', status_to_fetch).stream()
     return [{"id": doc.id, **doc.to_dict()} for doc in cases_ref]
+
+# --- THIS ENDPOINT WAS MISSING ---
+@app.get("/my-cases")
+async def get_my_cases(current_user: dict = Depends(get_current_user)):
+    if current_user.get('role') != 'patient':
+        raise HTTPException(status_code=403, detail="Access denied.")
+
+    cases_ref = db.collection('cases').where('patientEmail', '==', current_user['email']).stream()
+    return [{"id": doc.id, **doc.to_dict()} for doc in cases_ref]
+# --------------------------------
 
 @app.put("/cases/{case_id}/review")
 async def review_case(case_id: str, review: CaseReview, current_user: dict = Depends(get_current_user)):

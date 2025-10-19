@@ -26,11 +26,7 @@ db = firestore.client()
 app = FastAPI()
 
 # --- CORS CONFIGURATION ---
-origins = [
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "https://stenosis-app-frontend-git-main-hemish-jains-projects.vercel.app", # Your Vercel URL
-]
+origins = ["*"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
